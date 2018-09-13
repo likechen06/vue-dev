@@ -85,11 +85,12 @@ export function mergeDataOrFn (
     // it has to be a function to pass previous merges.
     return function mergedDataFn () {//返回的是一个方法
       return mergeData(
-        typeof childVal === 'function' ? childVal.call(this, this) : childVal,//TODO 这个方法的实际返回时什么,this 和vm 的区别是什么
+        typeof childVal === 'function' ? childVal.call(this, this) : childVal,//TODO 这个方法的实际返回时什么,this 和vm 的区别是什么,即对象冒充的相关用法
+        // 如果是个对象 说明是传入的{},如果是方法,就是之前做父子合并之后的方法?
         typeof parentVal === 'function' ? parentVal.call(this, this) : parentVal
       )
     }
-  } else {// 返回的也是一个方法
+  } else {// 返回的也是一个方法  返回的都是一个方法,保证了每个vue对象的data 属性都是同一个副本,不会相互间影响
     return function mergedInstanceDataFn () {
       // instance merge
       const instanceData = typeof childVal === 'function'
@@ -131,20 +132,21 @@ strats.data = function (
 
 /**
  * Hooks and props are merged as arrays.
+ * 
  */
 function mergeHook (
   parentVal: ?Array<Function>,
   childVal: ?Function | ?Array<Function>
 ): ?Array<Function> {
-  return childVal
-    ? parentVal
-      ? parentVal.concat(childVal)
-      : Array.isArray(childVal)
-        ? childVal
-        : [childVal]
-    : parentVal
+  return childVal// 是不是有子
+    ? parentVal// 有就判断 是不是有父
+      ? parentVal.concat(childVal) //有就父concat 子
+      : Array.isArray(childVal) // 没有父就判断 子是不是数组
+        ? childVal //子是数组 返回子数组   生命周期函数是可以写成数组的
+        : [childVal] // 否则新建一个数组放入子
+    : parentVal // 没有子,返回父
 }
-
+// 定义所有的生命周期函数都是同一个合并策略
 LIFECYCLE_HOOKS.forEach(hook => {
   strats[hook] = mergeHook
 })
@@ -170,7 +172,10 @@ function mergeAssets (
     return res
   }
 }
-
+//TODO  component 中自带的 KeepAlive,Transition,TransitionGroup 3个对象,确定赋值的位置
+// 'component',
+// 'directive',
+// 'filter'
 ASSET_TYPES.forEach(function (type) {
   strats[type + 's'] = mergeAssets
 })
@@ -206,7 +211,7 @@ strats.watch = function (
     }
     ret[key] = parent
       ? parent.concat(child)
-      : Array.isArray(child) ? child : [child]
+      : Array.isArray(child) ? child : [child]// 全部变成数组
   }
   return ret
 }
@@ -217,7 +222,7 @@ strats.watch = function (
 strats.props =
 strats.methods =
 strats.inject =
-strats.computed = function (
+strats.computed = function (// 之前已经进行了合并,能够确保是一个对象
   parentVal: ?Object,
   childVal: ?Object,
   vm?: Component,
@@ -229,9 +234,10 @@ strats.computed = function (
   if (!parentVal) return childVal
   const ret = Object.create(null)
   extend(ret, parentVal)
-  if (childVal) extend(ret, childVal)
+  if (childVal) extend(ret, childVal)// 直接用子覆盖掉父节点
   return ret
 }
+// provide 和合并策略和data 一致
 strats.provide = mergeDataOrFn
 
 /**
@@ -454,3 +460,14 @@ export function resolveAsset (
   }
   return res
 }
+
+/**
+ * strats 中各个属性合并和总结
+ * el 和 propsData  采用默认策略
+ * LIFECYCLE_HOOKS 一致,采用父子合并为数组的方式 进行
+ * ASSET_TYPES 中component filter directive 采用继承的方式,将父组件的所有asset 都继承过来了
+ * props、methods、inject、computed 采用父盖子的方式进行
+ * provide 和 data 返回一个函数,执行结果为最终结果
+ * 其他/自定义属性 采用默认策略或者自己申明策略
+ * 默认策略 defaultStrat 有子返回子,没有子选项返回父
+ */ 
